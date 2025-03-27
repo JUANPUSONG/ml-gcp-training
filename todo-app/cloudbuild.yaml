@@ -1,31 +1,43 @@
-steps:
-  # Install dependencies
-  - name: 'node:22'
-    dir: 'todo-app'
-    entrypoint: npm
-    args: ['ci']
+const mysql = require('mysql2/promise');
 
-  # Create .env file
-  - name: 'node:22'
-    dir: 'todo-app'
-    entrypoint: 'npm'
-    args: ['run', 'create-env', '.env']
-    secretEnv: ['JUANSQLKEY']
-    env:
-      - 'NEXT_PUBLIC_API_KEY=$$API_KEY'
+// MySQL connection configuration
+const getConfig = () => {
+  const config = {
+    user: process.env.DB_USER,
+    password: process.env.SQLJUAN || undefined,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+  };
 
-  # Deploy to App Engine
-  - name: 'gcr.io/cloud-builders/gcloud'
-    args: ['app', 'deploy', '--no-promote']
-    dir: 'todo-app'
+  // Check if we're using a Unix socket path (starts with /)
+  if (process.env.DB_HOST && process.env.DB_HOST.startsWith('/')) {
+    config.socketPath = process.env.DB_HOST;
+  } else {
+    // Otherwise use host/port (for local development)
+    config.host = process.env.DB_HOST || 'localhost';
+    config.port = process.env.DB_PORT || 3306;
+  }
 
-# Access secrets from Secret Manager
-availableSecrets:
-  secretManager:
-    - versionName: projects/${PROJECT_ID}/secrets/sqlnijuan/versions/latest
-      env: 'sqlnijuan'
+  return config;
+};
 
-timeout: '1600s' 
+const pool = mysql.createPool(getConfig());
 
-options:
-  logging: CLOUD_LOGGING_ONLY
+// Test database connection
+const testConnection = async () => {
+  try {
+    console.log('config', getConfig());
+    const [results] = await pool.query('SELECT NOW() as now');
+    return { connected: true, timestamp: results[0].now };
+  } catch (err) {
+    console.error('Database connection error:', err);
+    return { connected: false, error: err.message };
+  }
+};
+
+module.exports = {
+  pool,
+  testConnection
+};
